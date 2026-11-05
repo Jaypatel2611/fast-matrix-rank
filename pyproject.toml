@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fast-matrix-rank"
+version = "0.1.0"
+description = "Fast numerical rank for large sparse square matrices, with SVD fallback."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.23", "scipy>=1.11"]
+keywords = ["matrix rank", "sparse", "linear algebra", "scipy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+py-modules = ["fast_matrix_rank"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
