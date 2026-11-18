@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fast-matrix-rank"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fast numerical rank for large sparse square matrices, with SVD fallback."
 readme = "README.md"
 requires-python = ">=3.9"
