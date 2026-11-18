@@ -9,11 +9,21 @@ description = "Fast numerical rank for large sparse square matrices, with SVD fa
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+authors = [{ name = "Jay Patel", email = "jayp261118@gmail.com" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Mathematics",
+]
 dependencies = ["numpy>=1.23", "scipy>=1.11"]
 keywords = ["matrix rank", "sparse", "linear algebra", "scipy"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/Jaypatel2611/fast-matrix-rank"
+Issues = "https://github.com/Jaypatel2611/fast-matrix-rank/issues"
 
 [tool.setuptools]
 py-modules = ["fast_matrix_rank"]

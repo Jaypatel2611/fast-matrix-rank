@@ -11,6 +11,12 @@ This project was partially written with the assistance of Claude, an AI assistan
 ## Install
 
 ```bash
+pip install fast-matrix-rank
+```
+
+To install from source:
+
+```bash
 git clone https://github.com/Jaypatel2611/fast-matrix-rank.git
 cd fast-matrix-rank
 pip install -e .
@@ -67,6 +73,8 @@ Sparse tridiagonal, full rank:
 | 10,000 | 9.3 ms | not run (0.8 GB matrix) |
 | 100,000 | 90 ms | not run (80 GB matrix) |
 
+At small sizes the gain is modest (about 100× at N = 1,000) because dense SVD is still fast there.
+
 ## Related SciPy functions
 
 SciPy has no exact numerical rank for sparse matrices. These existing functions are related:
@@ -80,7 +88,7 @@ This package checks the actual values of a square sparse matrix with sparse LU, 
 
 Please read these before relying on the speedup.
 
-- **Only full-rank sparse matrices are fast.** If the LU factorization finds the matrix singular or badly scaled, the code converts to a dense array and runs SVD (or raises `RankNotDeterminedError` if `allow_dense=False`). A rank-deficient sparse matrix therefore costs about the same as plain `matrix_rank` (about 1.34 s vs 1.20 s at N = 2000 in my test).
+- **Only full-rank sparse matrices are fast.** If the LU factorization finds the matrix singular or badly scaled, the code converts to a dense array and runs SVD (or raises `RankNotDeterminedError` if `allow_dense=False`). A rank-deficient sparse matrix therefore costs about the same as plain `matrix_rank` (1.34 s vs 1.20 s at N = 2000 in my test).
 - **Rectangular sparse matrices are converted to dense**, or raise an error with `allow_dense=False`.
 - **LU is not rank-revealing.** A clean-looking `U` diagonal does not prove that a matrix is nonsingular. In my tests, about 15 % of random singular tridiagonal matrices (one duplicated row, N = 500) had no small pivot and an early version wrongly reported full rank. The package therefore also estimates the condition number (`scipy.sparse.linalg.onenormest` on the inverse, using the LU factors) and trusts the LU result only when that estimate is safely below 1/tolerance. The estimate is not a proof, so SVD remains the reference for borderline matrices.
 - **The O(N) behaviour applies to banded or low-fill matrices.** General sparse LU can suffer heavy fill-in.
@@ -95,7 +103,7 @@ pytest
 
 ## Contributing
 
-Issues and pull requests are welcome, especially benchmarks on other hardware and examples of matrices where the LU path gives the wrong rank.
+Issues and pull requests are welcome, especially benchmarks on other hardware and examples of matrices where the LU path gives the wrong rank. See `CONTRIBUTING.md`.
 
 ## License
 
