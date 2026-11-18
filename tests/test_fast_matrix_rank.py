@@ -2,7 +2,12 @@ import numpy as np
 import pytest
 import scipy.sparse as sp
 
-from fast_matrix_rank import hybrid_matrix_rank, nullity, vectorized_gauss_rank
+from fast_matrix_rank import (
+    RankNotDeterminedError,
+    hybrid_matrix_rank,
+    nullity,
+    vectorized_gauss_rank,
+)
 
 rng = np.random.default_rng(0)
 
@@ -90,3 +95,37 @@ def test_method_overrides():
         assert hybrid_matrix_rank(A, method=m) == 40
     with pytest.raises(ValueError):
         hybrid_matrix_rank(A, method="nope")
+
+
+def test_no_dense_full_rank_sparse_still_works():
+    assert hybrid_matrix_rank(tridiag(2000), allow_dense=False) == 2000
+    assert nullity(tridiag(2000), allow_dense=False) == 0
+
+
+def test_no_dense_singular_raises():
+    with pytest.raises(RankNotDeterminedError):
+        hybrid_matrix_rank(tridiag(500, dup_row=True), allow_dense=False)
+
+
+def test_no_dense_ill_conditioned_raises():
+    d = np.ones(300)
+    d[100] = 1e-14
+    with pytest.raises(RankNotDeterminedError):
+        hybrid_matrix_rank(sp.diags(d).tocsc(), allow_dense=False)
+
+
+def test_no_dense_rectangular_sparse_raises():
+    A = sp.random(20, 30, density=0.05, random_state=1, format="csr")
+    with pytest.raises(RankNotDeterminedError):
+        hybrid_matrix_rank(A, allow_dense=False)
+
+
+@pytest.mark.parametrize("method", ["gauss", "svd"])
+def test_no_dense_forced_method_on_sparse_raises(method):
+    with pytest.raises(RankNotDeterminedError):
+        hybrid_matrix_rank(tridiag(50), method=method, allow_dense=False)
+
+
+def test_no_dense_does_not_affect_dense_input():
+    A = rng.standard_normal((30, 30))
+    assert hybrid_matrix_rank(A, allow_dense=False) == 30

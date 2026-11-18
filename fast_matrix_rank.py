@@ -24,7 +24,18 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-__all__ = ["vectorized_gauss_rank", "hybrid_matrix_rank", "nullity"]
+__all__ = [
+    "vectorized_gauss_rank",
+    "hybrid_matrix_rank",
+    "nullity",
+    "RankNotDeterminedError",
+]
+
+
+class RankNotDeterminedError(RuntimeError):
+    """Raised when ``allow_dense=False`` and the rank cannot be decided
+    without converting a sparse matrix to a dense array."""
+
 
 # If min|U_ii| / max|U_ii| is below this, the LU rank is not trusted.
 _LU_RATIO_TRUST = 1e-8
@@ -77,6 +88,17 @@ def vectorized_gauss_rank(A: np.ndarray, rtol: Optional[float] = None) -> int:
     return pivot_row
 
 
+def _to_dense(A, allow_dense: bool, reason: str) -> np.ndarray:
+    """Convert sparse input to dense, or raise if that is not allowed."""
+    if not sp.issparse(A):
+        return A
+    if not allow_dense:
+        raise RankNotDeterminedError(
+            f"{reason} Pass allow_dense=True to convert to a dense array."
+        )
+    return A.toarray()
+
+
 def _svd_rank(A, rtol: Optional[float]) -> int:
     """NumPy's own default tolerance (relative to the largest singular value)."""
     dense = A.toarray() if sp.issparse(A) else np.asarray(A)
@@ -89,18 +111,50 @@ def _svd_rank(A, rtol: Optional[float]) -> int:
     return int(np.sum(s > rtol * s[0])) if s.size and s[0] > 0 else 0
 
 
+def _cond_ok(A_csc, lu, rtol: Optional[float]) -> bool:
+    """True if the estimated 1-norm condition number is safely below 1/tol.
+
+    Uses ``onenormest`` on the inverse (a few sparse triangular solves), so
+    the matrix stays sparse. This is an estimate, not a proof.
+    """
+    n = A_csc.shape[0]
+    eps = float(np.finfo(float).eps)
+    limit = 1.0 / (rtol if rtol is not None else n * eps)
+    inv = spla.LinearOperator(
+        (n, n),
+        matvec=lambda x: lu.solve(np.asarray(x)),
+        rmatvec=lambda x: lu.solve(np.asarray(x), trans="H"),
+        matmat=lambda X: lu.solve(np.asarray(X)),
+        rmatmat=lambda X: lu.solve(np.asarray(X), trans="H"),
+        dtype=A_csc.dtype,
+    )
+    try:
+        inv_norm = spla.onenormest(inv)
+    except Exception:  # estimator failure: do not trust LU
+        return False
+    cond = float(spla.norm(A_csc, 1)) * float(inv_norm)
+    return bool(np.isfinite(cond) and cond < limit)
+
+
 def hybrid_matrix_rank(
     A,
     rtol: Optional[float] = None,
     density_threshold: float = 0.15,
     dense_gauss_cutoff: int = 500,
     method: str = "auto",
+    allow_dense: bool = True,
 ) -> int:
     """Numerical rank of a dense or sparse matrix.
 
     ``method``: "auto", "gauss", "svd". ``rtol`` is relative to the largest
     singular value on the SVD route and to the largest absolute entry on the
     Gauss/LU routes.
+
+    ``allow_dense``: if False, a sparse input is never converted to a dense
+    array. When the answer cannot be decided with sparse LU alone (singular
+    or badly scaled factorization, rectangular or dense-ish input, or a forced
+    "gauss"/"svd" method), ``RankNotDeterminedError`` is raised instead.
+    Dense NumPy input is not affected.
     """
     if not sp.issparse(A):
         A = np.asarray(A)
@@ -111,9 +165,13 @@ def hybrid_matrix_rank(
     m, n = A.shape
 
     if method == "svd":
-        return _svd_rank(A, rtol)
+        return _svd_rank(
+            _to_dense(A, allow_dense, "method='svd' needs a dense array."), rtol
+        )
     if method == "gauss":
-        return vectorized_gauss_rank(A.toarray() if sp.issparse(A) else A, rtol)
+        return vectorized_gauss_rank(
+            _to_dense(A, allow_dense, "method='gauss' needs a dense array."), rtol
+        )
     if method != "auto":
         raise ValueError(f"Unknown method {method!r}.")
 
@@ -127,10 +185,13 @@ def hybrid_matrix_rank(
 
     # Dense, rectangular or tiny -> no sparse LU.
     if density > density_threshold or m != n or n < 2:
+        A = _to_dense(
+            A,
+            allow_dense,
+            "Sparse LU only handles square, sparse matrices.",
+        )
         if max(m, n) <= dense_gauss_cutoff:
-            return vectorized_gauss_rank(
-                A.toarray() if sp.issparse(A) else A, rtol
-            )
+            return vectorized_gauss_rank(A, rtol)
         return _svd_rank(A, rtol)
 
     # Square and sparse: try sparse LU.
@@ -140,20 +201,24 @@ def hybrid_matrix_rank(
     try:
         lu = spla.splu(A_csc, diag_pivot_thresh=1.0)
     except RuntimeError:  # "Factor is exactly singular"
+        _to_dense(A_csc, allow_dense, "The LU factorization found the matrix singular.")
         return _svd_rank(A_csc, rtol)
 
     u_diag = np.abs(lu.U.diagonal())
     u_max = float(u_diag.max())
-    # Trust LU only if it says full rank AND the pivots are well scaled.
+    # Trust LU only if the pivots look fine AND the estimated condition number
+    # says the matrix is safely nonsingular. The pivots alone are not enough:
+    # a singular matrix can still have a clean-looking U diagonal.
     if u_max > 0 and float(u_diag.min()) / u_max > _LU_RATIO_TRUST:
         tol = _default_tol((m, n), float(np.abs(A_csc.data).max()), rtol)
-        if float(u_diag.min()) > tol:
+        if float(u_diag.min()) > tol and _cond_ok(A_csc, lu, rtol):
             return n
+    _to_dense(A_csc, allow_dense, "The LU result is not reliable (poorly scaled pivots).")
     return _svd_rank(A_csc, rtol)
 
 
-def nullity(A, rtol: Optional[float] = None) -> int:
+def nullity(A, rtol: Optional[float] = None, allow_dense: bool = True) -> int:
     """Nullity = columns - rank."""
     if not sp.issparse(A):
         A = np.asarray(A)
-    return A.shape[1] - hybrid_matrix_rank(A, rtol=rtol)
+    return A.shape[1] - hybrid_matrix_rank(A, rtol=rtol, allow_dense=allow_dense)
